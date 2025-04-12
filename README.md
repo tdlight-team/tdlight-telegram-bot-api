@@ -91,6 +91,9 @@ maximum number of batch operations (default 10000)
 ##### Executable parameter `--stats-hide-sensible-data`
 Makes the stats page (if enabled) hide the bot token and the webhook url to no leak user secrets, when served publicly.
 
+##### Executable parameter `--http-idle-timeout`
+HTTP timeout in seconds. Use env `TELEGRAM_HTTP_IDLE_TIMEOUT` for docker. Defaults to 500s
+
 #### Existing Command Line Parameters
 Which are not properly documented, so they are written down here.
 
