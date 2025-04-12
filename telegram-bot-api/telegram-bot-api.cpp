@@ -189,6 +189,7 @@ int main(int argc, char *argv[]) {
   td::uint64 max_connections = 0;
   td::uint64 cpu_affinity = 0;
   td::uint64 main_thread_affinity = 0;
+  int http_idle_timeout = 500;
   ClientManager::TokenRange token_range{0, 1};
 
   parameters->api_id_ = [](auto x) -> td::int32 {
@@ -231,6 +232,8 @@ int main(int argc, char *argv[]) {
                      td::OptionParser::parse_string(parameters->api_hash_));
   options.add_checked_option('p', "http-port", PSLICE() << "HTTP listening port (default is " << http_port << ")",
                              td::OptionParser::parse_integer(http_port));
+  options.add_checked_option('\0', "http-idle-timeout", PSLICE() << "HTTP idle timeout (default is " << http_idle_timeout << ")",
+                              td::OptionParser::parse_integer(http_idle_timeout));
   options.add_checked_option('s', "http-stat-port", "HTTP statistics port",
                              td::OptionParser::parse_integer(http_stat_port));
   options.add_option('d', "dir", "server working directory", td::OptionParser::parse_string(working_directory));
@@ -491,7 +494,7 @@ int main(int argc, char *argv[]) {
 
   sched
       .create_actor_unsafe<HttpServer>(
-          SharedData::get_client_scheduler_id(), "HttpServer", http_ip_address, http_port,
+          SharedData::get_client_scheduler_id(), "HttpServer", http_ip_address, http_port, http_idle_timeout,
           [client_manager, shared_data] {
             return td::ActorOwn<td::HttpInboundConnection::Callback>(
                 td::create_actor<HttpConnection>("HttpConnection", client_manager, shared_data));
@@ -501,7 +504,7 @@ int main(int argc, char *argv[]) {
   if (http_stat_port != 0) {
     sched
         .create_actor_unsafe<HttpServer>(
-            SharedData::get_client_scheduler_id(), "HttpStatsServer", http_stat_ip_address, http_stat_port,
+            SharedData::get_client_scheduler_id(), "HttpStatsServer", http_stat_ip_address, http_stat_port, http_idle_timeout,
             [client_manager] {
               return td::ActorOwn<td::HttpInboundConnection::Callback>(
                   td::create_actor<HttpStatConnection>("HttpStatConnection", client_manager));
