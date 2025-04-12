@@ -61,6 +61,9 @@ fi
 if [ -n "$TELEGRAM_FILE_EXPIRATION_TIME" ]; then
   CUSTOM_ARGS="${CUSTOM_ARGS} --file-expiration-time=$TELEGRAM_FILE_EXPIRATION_TIME"
 fi
+if [ -n "$TELEGRAM_HTTP_IDLE_TIMEOUT" ]; then
+  CUSTOM_ARGS="${CUSTOM_ARGS} --http-idle-timeout=$TELEGRAM_HTTP_IDLE_TIMEOUT"
+fi
 if [ -n "$TELEGRAM_LOGS" ]; then
   CUSTOM_ARGS="$CUSTOM_ARGS --log=${TELEGRAM_LOGS}"
 else

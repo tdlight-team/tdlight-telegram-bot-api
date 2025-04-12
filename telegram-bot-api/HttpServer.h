@@ -28,9 +28,9 @@ namespace telegram_bot_api {
 
 class HttpServer final : public td::TcpListener::Callback {
  public:
-  HttpServer(td::string ip_address, int port,
+  HttpServer(td::string ip_address, int port, int idle_timeout,
              std::function<td::ActorOwn<td::HttpInboundConnection::Callback>()> creator)
-      : ip_address_(std::move(ip_address)), port_(port), creator_(std::move(creator)) {
+      : ip_address_(std::move(ip_address)), port_(port), idle_timeout_(idle_timeout), creator_(std::move(creator)) {
     flood_control_.add_limit(1, 1);    // 1 in a second
     flood_control_.add_limit(60, 10);  // 10 in a minute
   }
@@ -38,6 +38,7 @@ class HttpServer final : public td::TcpListener::Callback {
  private:
   td::string ip_address_;
   td::int32 port_;
+  td::int32 idle_timeout_;
   std::function<td::ActorOwn<td::HttpInboundConnection::Callback>()> creator_;
   td::ActorOwn<td::TcpListener> listener_;
   td::FloodControlFast flood_control_;
@@ -64,7 +65,7 @@ class HttpServer final : public td::TcpListener::Callback {
 
   void accept(td::SocketFd fd) final {
     td::create_actor<td::HttpInboundConnection>("HttpInboundConnection", td::BufferedFd<td::SocketFd>(std::move(fd)), 0,
-                                                50, 500, creator_(), SharedData::get_slow_incoming_http_scheduler_id())
+                                                50, idle_timeout_, creator_(), SharedData::get_slow_incoming_http_scheduler_id())
         .release();
   }
 
