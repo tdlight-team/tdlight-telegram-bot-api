@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -595,9 +595,9 @@ void WebhookActor::handle(td::unique_ptr<td::HttpQuery> response) {
 
   auto connection_id = get_link_token();
   if (response) {
-    VLOG(webhook) << "Got response from connection " << connection_id;
+    VLOG(webhook) << "Receive response from connection " << connection_id;
   } else {
-    VLOG(webhook) << "Got hangup from connection " << connection_id;
+    VLOG(webhook) << "Receive hangup from connection " << connection_id;
   }
   auto *connection_ptr = connections_.get(connection_id);
   if (connection_ptr == nullptr) {

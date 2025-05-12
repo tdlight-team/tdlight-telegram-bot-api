@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -97,9 +97,6 @@ td::vector<td::vector<StatItem>> ServerCpuStat::as_json_ready_vector(double now)
   }
   return res;
 }
-
-constexpr int ServerCpuStat::DURATIONS[SIZE];
-constexpr const char *ServerCpuStat::DESCR[SIZE];
 
 void ServerBotStat::normalize(double duration) {
   if (duration == 0) {
@@ -236,8 +233,5 @@ td::int64 BotStatActor::get_active_file_upload_count() const {
 bool BotStatActor::is_active(double now) const {
   return last_activity_timestamp_ > now - 86400;
 }
-
-constexpr int BotStatActor::DURATIONS[SIZE];
-constexpr const char *BotStatActor::DESCR[SIZE];
 
 }  // namespace telegram_bot_api
