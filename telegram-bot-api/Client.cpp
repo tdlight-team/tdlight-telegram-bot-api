@@ -17622,19 +17622,6 @@ td::int64 Client::get_status_custom_emoji_id(const object_ptr<td_api::emojiStatu
   }
 }
 
-constexpr int Client::LOGGING_OUT_ERROR_CODE;
-constexpr td::Slice Client::LOGGING_OUT_ERROR_DESCRIPTION;
-constexpr td::Slice Client::API_ID_INVALID_ERROR_DESCRIPTION;
-
-constexpr int Client::CLOSING_ERROR_CODE;
-constexpr td::Slice Client::CLOSING_ERROR_DESCRIPTION;
-
-constexpr int Client::BOT_ONLY_ERROR_CODE;
-constexpr td::Slice Client::BOT_ONLY_ERROR_DESCRIPTION;
-
-constexpr int Client::USER_ONLY_ERROR_CODE;
-constexpr td::Slice Client::USER_ONLY_ERROR_DESCRIPTION;
-
 td::FlatHashMap<td::string, td::Status (Client::*)(PromisedQueryPtr &query)> Client::methods_;
 
 }  // namespace telegram_bot_api
