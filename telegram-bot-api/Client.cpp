@@ -15381,8 +15381,8 @@ td::Status Client::process_search_chat_messages_query(PromisedQueryPtr &query) {
   check_chat(chat_id, AccessRights::Read, std::move(query),
              [this, query_, sender = std::move(sender), from_message_id, filter = std::move(filter)](
                  int64 chat_id, PromisedQueryPtr query) mutable {
-               send_request(make_object<td_api::searchChatMessages>(chat_id, query_.str(), std::move(sender),
-                                                                    from_message_id, 0, 100, std::move(filter), 0, 0),
+               send_request(make_object<td_api::searchChatMessages>(chat_id, nullptr, query_.str(), std::move(sender),
+                                                                    from_message_id, 0, 100, std::move(filter)),
                             td::make_unique<TdOnFoundMessagesCallback>(this, std::move(query)));
              });
   return td::Status::OK();
