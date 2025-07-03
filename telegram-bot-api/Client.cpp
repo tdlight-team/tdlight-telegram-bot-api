@@ -255,6 +255,7 @@ bool Client::init_methods() {
   methods_.emplace("sendcontact", &Client::process_send_contact_query);
   methods_.emplace("sendpoll", &Client::process_send_poll_query);
   methods_.emplace("stoppoll", &Client::process_stop_poll_query);
+  methods_.emplace("sendchecklist", &Client::process_send_checklist_query);
   methods_.emplace("copymessage", &Client::process_copy_message_query);
   methods_.emplace("copymessages", &Client::process_copy_messages_query);
   methods_.emplace("forwardmessage", &Client::process_forward_message_query);
@@ -267,6 +268,7 @@ bool Client::init_methods() {
   methods_.emplace("stopmessagelivelocation", &Client::process_edit_message_live_location_query);
   methods_.emplace("editmessagemedia", &Client::process_edit_message_media_query);
   methods_.emplace("editmessagecaption", &Client::process_edit_message_caption_query);
+  methods_.emplace("editmessagechecklist", &Client::process_edit_message_checklist_query);
   methods_.emplace("editmessagereplymarkup", &Client::process_edit_message_reply_markup_query);
   methods_.emplace("deletemessage", &Client::process_delete_message_query);
   methods_.emplace("deletemessages", &Client::process_delete_messages_query);
@@ -274,6 +276,7 @@ bool Client::init_methods() {
   methods_.emplace("editstory", &Client::process_edit_story_query);
   methods_.emplace("deletestory", &Client::process_delete_story_query);
   methods_.emplace("createinvoicelink", &Client::process_create_invoice_link_query);
+  methods_.emplace("getmystarbalance", &Client::process_get_my_star_balance_query);
   methods_.emplace("getstartransactions", &Client::process_get_star_transactions_query);
   methods_.emplace("refundstarpayment", &Client::process_refund_star_payment_query);
   methods_.emplace("edituserstarsubscription", &Client::process_edit_user_star_subscription_query);
@@ -819,16 +822,16 @@ class Client::JsonGift final : public td::Jsonable {
 
 class Client::JsonGifts final : public td::Jsonable {
  public:
-  JsonGifts(const td_api::gifts *gifts, const Client *client) : gifts_(gifts), client_(client) {
+  JsonGifts(const td::vector<td_api::object_ptr<td_api::gift>> &gifts, const Client *client)
+      : gifts_(gifts), client_(client) {
   }
   void store(td::JsonValueScope *scope) const {
     auto object = scope->enter_object();
-    object("gifts",
-           td::json_array(gifts_->gifts_, [client = client_](auto &gift) { return JsonGift(gift.get(), client); }));
+    object("gifts", td::json_array(gifts_, [client = client_](auto &gift) { return JsonGift(gift.get(), client); }));
   }
 
  private:
-  const td_api::gifts *gifts_;
+  const td::vector<td_api::object_ptr<td_api::gift>> &gifts_;
   const Client *client_;
 };
 
@@ -1309,8 +1312,13 @@ class Client::JsonChat final : public td::Jsonable {
         if (!supergroup_info->active_usernames.empty()) {
           object("username", supergroup_info->active_usernames[0]);
         }
-        if (supergroup_info->is_supergroup && supergroup_info->is_forum) {
-          object("is_forum", td::JsonTrue());
+        if (supergroup_info->is_supergroup) {
+          if (supergroup_info->is_forum) {
+            object("is_forum", td::JsonTrue());
+          }
+          if (supergroup_info->is_direct_messages) {
+            object("is_direct_messages", td::JsonTrue());
+          }
         }
 
         if (supergroup_info->is_supergroup) {
@@ -1390,6 +1398,9 @@ class Client::JsonChat final : public td::Jsonable {
           }
           if (supergroup_info->linked_chat_id != 0) {
             object("linked_chat_id", supergroup_info->linked_chat_id);
+          }
+          if (supergroup_info->is_direct_messages && supergroup_info->direct_messages_chat_id != 0) {
+            object("parent_chat", JsonChat(supergroup_info->direct_messages_chat_id, client_));
           }
           if (supergroup_info->location != nullptr) {
             object("location", JsonChatLocation(supergroup_info->location.get()));
@@ -2131,6 +2142,105 @@ class Client::JsonPollAnswer final : public td::Jsonable {
   const Client *client_;
 };
 
+class Client::JsonChecklistTask final : public td::Jsonable {
+ public:
+  JsonChecklistTask(const td_api::checklistTask *task, const Client *client) : task_(task), client_(client) {
+  }
+  void store(td::JsonValueScope *scope) const {
+    auto object = scope->enter_object();
+    object("id", task_->id_);
+    object("text", task_->text_->text_);
+    if (!task_->text_->entities_.empty()) {
+      object("text_entities", JsonVectorEntities(task_->text_->entities_, client_));
+    }
+    if (task_->completed_by_user_id_ != 0 && task_->completion_date_ != 0) {
+      object("completed_by_user", JsonUser(task_->completed_by_user_id_, client_));
+      object("completion_date", task_->completion_date_);
+    }
+  }
+
+ private:
+  const td_api::checklistTask *task_;
+  const Client *client_;
+};
+
+class Client::JsonChecklist final : public td::Jsonable {
+ public:
+  JsonChecklist(const td_api::checklist *checklist, const Client *client) : checklist_(checklist), client_(client) {
+  }
+  void store(td::JsonValueScope *scope) const {
+    auto object = scope->enter_object();
+    object("title", checklist_->title_->text_);
+    if (!checklist_->title_->entities_.empty()) {
+      object("title_entities", JsonVectorEntities(checklist_->title_->entities_, client_));
+    }
+    object("tasks", td::json_array(checklist_->tasks_,
+                                   [client = client_](auto &task) { return JsonChecklistTask(task.get(), client); }));
+    if (checklist_->others_can_add_tasks_) {
+      object("others_can_add_tasks", td::JsonTrue());
+    }
+    if (checklist_->others_can_mark_tasks_as_done_) {
+      object("others_can_mark_tasks_as_done", td::JsonTrue());
+    }
+  }
+
+ private:
+  const td_api::checklist *checklist_;
+  const Client *client_;
+};
+
+class Client::JsonChecklistTasksDone final : public td::Jsonable {
+ public:
+  JsonChecklistTasksDone(const td_api::messageChecklistTasksDone *checklist_tasks_done, int64 chat_id,
+                         const Client *client)
+      : checklist_tasks_done_(checklist_tasks_done), chat_id_(chat_id), client_(client) {
+  }
+  void store(td::JsonValueScope *scope) const {
+    auto object = scope->enter_object();
+    const MessageInfo *checklist_message =
+        client_->get_message(chat_id_, checklist_tasks_done_->checklist_message_id_, true);
+    if (checklist_message != nullptr) {
+      object("checklist_message", JsonMessage(checklist_message, false, "checklist tasks done", client_));
+    }
+    if (!checklist_tasks_done_->marked_as_done_task_ids_.empty()) {
+      object("marked_as_done_task_ids",
+             td::json_array(checklist_tasks_done_->marked_as_done_task_ids_, [](int32 task_id) { return task_id; }));
+    }
+    if (!checklist_tasks_done_->marked_as_not_done_task_ids_.empty()) {
+      object("marked_as_not_done_task_ids", td::json_array(checklist_tasks_done_->marked_as_not_done_task_ids_,
+                                                           [](int32 task_id) { return task_id; }));
+    }
+  }
+
+ private:
+  const td_api::messageChecklistTasksDone *checklist_tasks_done_;
+  int64 chat_id_;
+  const Client *client_;
+};
+
+class Client::JsonChecklistTasksAdded final : public td::Jsonable {
+ public:
+  JsonChecklistTasksAdded(const td_api::messageChecklistTasksAdded *checklist_tasks_added, int64 chat_id,
+                          const Client *client)
+      : checklist_tasks_added_(checklist_tasks_added), chat_id_(chat_id), client_(client) {
+  }
+  void store(td::JsonValueScope *scope) const {
+    auto object = scope->enter_object();
+    const MessageInfo *checklist_message =
+        client_->get_message(chat_id_, checklist_tasks_added_->checklist_message_id_, true);
+    if (checklist_message != nullptr) {
+      object("checklist_message", JsonMessage(checklist_message, false, "checklist tasks added", client_));
+    }
+    object("tasks", td::json_array(checklist_tasks_added_->tasks_,
+                                   [client = client_](auto &task) { return JsonChecklistTask(task.get(), client); }));
+  }
+
+ private:
+  const td_api::messageChecklistTasksAdded *checklist_tasks_added_;
+  int64 chat_id_;
+  const Client *client_;
+};
+
 class Client::JsonStory final : public td::Jsonable {
  public:
   JsonStory(int64 chat_id, int32 story_id, const Client *client)
@@ -2493,9 +2603,17 @@ class Client::JsonUniqueGiftMessage final : public td::Jsonable {
       object("owned_gift_id", gift_->received_gift_id_);
       if (gift_->can_be_transferred_) {
         object("transfer_star_count", gift_->transfer_star_count_);
+        if (gift_->next_transfer_date_ > 0) {
+          object("next_transfer_date", gift_->next_transfer_date_);
+        }
       }
     }
-    object("origin", gift_->is_upgrade_ ? td::Slice("upgrade") : td::Slice("transfer"));
+    if (gift_->last_resale_star_count_) {
+      object("origin", "resale");
+      object("last_resale_star_count", gift_->last_resale_star_count_);
+    } else {
+      object("origin", gift_->is_upgrade_ ? td::Slice("upgrade") : td::Slice("transfer"));
+    }
   }
 
  private:
@@ -2982,6 +3100,23 @@ class Client::JsonPaidMessagePriceChanged final : public td::Jsonable {
   const td_api::messagePaidMessagePriceChanged *price_changed_;
 };
 
+class Client::JsonDirectMessagePriceChanged final : public td::Jsonable {
+ public:
+  explicit JsonDirectMessagePriceChanged(const td_api::messageDirectMessagePriceChanged *price_changed)
+      : price_changed_(price_changed) {
+  }
+  void store(td::JsonValueScope *scope) const {
+    auto object = scope->enter_object();
+    object("are_direct_messages_enabled", td::JsonBool(price_changed_->is_enabled_));
+    if (price_changed_->paid_message_star_count_ > 0) {
+      object("direct_message_star_count", price_changed_->paid_message_star_count_);
+    }
+  }
+
+ private:
+  const td_api::messageDirectMessagePriceChanged *price_changed_;
+};
+
 class Client::JsonWebAppInfo final : public td::Jsonable {
  public:
   explicit JsonWebAppInfo(const td::string &url) : url_(url) {
@@ -3247,7 +3382,12 @@ class Client::JsonExternalReplyInfo final : public td::Jsonable {
         }
         case td_api::messageStory::ID: {
           auto content = static_cast<const td_api::messageStory *>(reply_->content_.get());
-          object("story", JsonStory(content->story_sender_chat_id_, content->story_id_, client_));
+          object("story", JsonStory(content->story_poster_chat_id_, content->story_id_, client_));
+          break;
+        }
+        case td_api::messageChecklist::ID: {
+          auto content = static_cast<const td_api::messageChecklist *>(reply_->content_.get());
+          object("checklist", JsonChecklist(content->list_.get(), client_));
           break;
         }
         default:
@@ -3396,7 +3536,7 @@ void Client::JsonMessage::store(td::JsonValueScope *scope) const {
   }
   if (message_->reply_to_story != nullptr) {
     object("reply_to_story",
-           JsonStory(message_->reply_to_story->story_sender_chat_id_, message_->reply_to_story->story_id_, client_));
+           JsonStory(message_->reply_to_story->story_poster_chat_id_, message_->reply_to_story->story_id_, client_));
   }
   if (message_->media_album_id != 0) {
     object("media_group_id", td::to_string(message_->media_album_id));
@@ -3743,7 +3883,7 @@ void Client::JsonMessage::store(td::JsonValueScope *scope) const {
     }
     case td_api::messageStory::ID: {
       auto content = static_cast<const td_api::messageStory *>(message_->content.get());
-      object("story", JsonStory(content->story_sender_chat_id_, content->story_id_, client_));
+      object("story", JsonStory(content->story_poster_chat_id_, content->story_id_, client_));
       break;
     }
     case td_api::messageChatSetBackground::ID: {
@@ -3809,6 +3949,28 @@ void Client::JsonMessage::store(td::JsonValueScope *scope) const {
       object("paid_message_price_changed", JsonPaidMessagePriceChanged(content));
       break;
     }
+    case td_api::messageGroupCall::ID:
+      break;
+    case td_api::messageDirectMessagePriceChanged::ID: {
+      auto content = static_cast<const td_api::messageDirectMessagePriceChanged *>(message_->content.get());
+      object("direct_message_price_changed", JsonDirectMessagePriceChanged(content));
+      break;
+    }
+    case td_api::messageChecklist::ID: {
+      auto content = static_cast<const td_api::messageChecklist *>(message_->content.get());
+      object("checklist", JsonChecklist(content->list_.get(), client_));
+      break;
+    }
+    case td_api::messageChecklistTasksDone::ID: {
+      auto content = static_cast<const td_api::messageChecklistTasksDone *>(message_->content.get());
+      object("checklist_tasks_done", JsonChecklistTasksDone(content, message_->chat_id, client_));
+      break;
+    }
+    case td_api::messageChecklistTasksAdded::ID: {
+      auto content = static_cast<const td_api::messageChecklistTasksAdded *>(message_->content.get());
+      object("checklist_tasks_added", JsonChecklistTasksAdded(content, message_->chat_id, client_));
+      break;
+    }
     default:
       UNREACHABLE();
   }
@@ -3821,7 +3983,7 @@ void Client::JsonMessage::store(td::JsonValueScope *scope) const {
   if (!message_->can_be_saved) {
     object("has_protected_content", td::JsonTrue());
   }
-  if (message_->is_topic_message) {
+  if (is_topic_message(message_->topic_id)) {
     object("is_topic_message", td::JsonTrue());
   }
   if (message_->is_from_offline) {
@@ -4678,9 +4840,9 @@ class Client::JsonStarAmount final : public td::Jsonable {
   }
   void store(td::JsonValueScope *scope) const {
     auto object = scope->enter_object();
-    object("star_count", amount_->star_count_);
+    object("amount", amount_->star_count_);
     if (amount_->nanostar_count_ != 0) {
-      object("nanostar_count", amount_->nanostar_count_);
+      object("nanostar_amount", amount_->nanostar_count_);
     }
   }
 
@@ -4758,6 +4920,9 @@ class Client::JsonReceivedGift final : public td::Jsonable {
     }
     if (received_gift_->transfer_star_count_ > 0) {
       object("transfer_star_count", received_gift_->transfer_star_count_);
+    }
+    if (received_gift_->next_transfer_date_ > 0) {
+      object("next_transfer_date", received_gift_->next_transfer_date_);
     }
   }
 
@@ -5769,7 +5934,7 @@ class Client::TdOnGetStoryCallback final : public TdQueryCallback {
 
     CHECK(result->get_id() == td_api::story::ID);
     auto story = static_cast<const td_api::story *>(result.get());
-    answer_query(JsonStory(story->sender_chat_id_, story->id_, client_), std::move(query_));
+    answer_query(JsonStory(story->poster_chat_id_, story->id_, client_), std::move(query_));
   }
 
  private:
@@ -6130,7 +6295,7 @@ class Client::TdOnCheckMessageThreadCallback final : public TdQueryCallback {
     if (message_info->message_thread_id != message_thread_id_) {
       return fail_query_with_error(std::move(query_), 400, "MESSAGE_THREAD_INVALID", "Message thread not found");
     }
-    if (!message_info->is_topic_message) {
+    if (!is_topic_message(message_info->topic_id)) {
       return fail_query_with_error(std::move(query_), 400, "MESSAGE_THREAD_INVALID",
                                    "Message thread is not a forum topic thread");
     }
@@ -6892,6 +7057,25 @@ class Client::TdOnGetReceivedGiftsCallback final : public TdQueryCallback {
   PromisedQueryPtr query_;
 };
 
+class Client::TdOnGetMyStarBalanceCallback final : public TdQueryCallback {
+ public:
+  explicit TdOnGetMyStarBalanceCallback(PromisedQueryPtr query) : query_(std::move(query)) {
+  }
+
+  void on_result(object_ptr<td_api::Object> result) final {
+    if (result->get_id() == td_api::error::ID) {
+      return fail_query_with_error(std::move(query_), move_object_as<td_api::error>(result));
+    }
+
+    CHECK(result->get_id() == td_api::starTransactions::ID);
+    auto transactions = move_object_as<td_api::starTransactions>(result);
+    answer_query(JsonStarAmount(transactions->star_amount_.get()), std::move(query_));
+  }
+
+ private:
+  PromisedQueryPtr query_;
+};
+
 class Client::TdOnGetStarTransactionsCallback final : public TdQueryCallback {
  public:
   TdOnGetStarTransactionsCallback(const Client *client, PromisedQueryPtr query)
@@ -7004,11 +7188,11 @@ class Client::TdOnGetGiftsCallback final : public TdQueryCallback {
       return fail_query_with_error(std::move(query_), move_object_as<td_api::error>(result));
     }
 
-    CHECK(result->get_id() == td_api::gifts::ID);
-    auto gifts = move_object_as<td_api::gifts>(result);
-    td::remove_if(gifts->gifts_,
-                  [](const auto &gift) { return gift->total_count_ > 0 && gift->remaining_count_ == 0; });
-    answer_query(JsonGifts(gifts.get(), client_), std::move(query_));
+    CHECK(result->get_id() == td_api::availableGifts::ID);
+    auto available_gifts = move_object_as<td_api::availableGifts>(result);
+    auto gifts = td::transform(std::move(available_gifts->gifts_), [](auto &&gift) { return std::move(gift->gift_); });
+    td::remove_if(gifts, [](const auto &gift) { return gift->total_count_ > 0 && gift->remaining_count_ == 0; });
+    answer_query(JsonGifts(gifts, client_), std::move(query_));
   }
 
  private:
@@ -8400,14 +8584,14 @@ void Client::on_update(object_ptr<td_api::Object> result) {
                              std::move(update->error_));
       break;
     }
-    case td_api::updateStorySendSucceeded::ID: {
-      auto update = move_object_as<td_api::updateStorySendSucceeded>(result);
+    case td_api::updateStoryPostSucceeded::ID: {
+      auto update = move_object_as<td_api::updateStoryPostSucceeded>(result);
       on_story_send_succeeded(std::move(update->story_), update->old_story_id_);
       break;
     }
-    case td_api::updateStorySendFailed::ID: {
-      auto update = move_object_as<td_api::updateStorySendFailed>(result);
-      on_story_send_failed(update->story_->sender_chat_id_, update->story_->id_, std::move(update->error_));
+    case td_api::updateStoryPostFailed::ID: {
+      auto update = move_object_as<td_api::updateStoryPostFailed>(result);
+      on_story_send_failed(update->story_->poster_chat_id_, update->story_->id_, std::move(update->error_));
       break;
     }
     case td_api::updateMessageContent::ID: {
@@ -8626,6 +8810,7 @@ void Client::on_update(object_ptr<td_api::Object> result) {
       supergroup_info->slow_mode_delay = full_info->slow_mode_delay_;
       supergroup_info->unrestrict_boost_count = full_info->unrestrict_boost_count_;
       supergroup_info->linked_chat_id = full_info->linked_chat_id_;
+      supergroup_info->direct_messages_chat_id = full_info->direct_messages_chat_id_;
       supergroup_info->location = std::move(full_info->location_);
       supergroup_info->has_hidden_members = full_info->has_hidden_members_;
       supergroup_info->has_aggressive_anti_spam_enabled = full_info->has_aggressive_anti_spam_enabled_;
@@ -9633,8 +9818,8 @@ td_api::object_ptr<td_api::messageSendOptions> Client::get_message_send_options(
                                                                                 bool allow_paid_broadcast,
                                                                                 int64 effect_id,
                                                                                 td_api::object_ptr<td_api::MessageSchedulingState> &&scheduling_state) {
-  return make_object<td_api::messageSendOptions>(disable_notification, false, protect_content, allow_paid_broadcast, 0,
-                                                 false, std::move(scheduling_state), effect_id, 0, false);
+  return make_object<td_api::messageSendOptions>(0, disable_notification, false, protect_content, allow_paid_broadcast,
+                                                 0, false, std::move(scheduling_state), effect_id, 0, false);
 }
 
 td::Result<td_api::object_ptr<td_api::inlineQueryResultsButton>> Client::get_inline_query_results_button(
@@ -10970,6 +11155,77 @@ td::Result<td_api::object_ptr<td_api::chatPermissions>> Client::get_chat_permiss
                                               can_change_info, can_invite_users, can_pin_messages, can_manage_topics);
 }
 
+td::Result<td_api::object_ptr<td_api::inputChecklistTask>> Client::get_input_checklist_task(
+    td::JsonValue &&input_task) const {
+  if (input_task.type() != td::JsonValue::Type::Object) {
+    return td::Status::Error("expected an Object");
+  }
+
+  auto &object = input_task.get_object();
+  TRY_RESULT(id, object.get_required_int_field("id"));
+  TRY_RESULT(input_text, object.get_required_string_field("text"));
+  TRY_RESULT(parse_mode, object.get_optional_string_field("parse_mode"));
+  auto entities = object.extract_field("text_entities");
+  TRY_RESULT(text, get_formatted_text(std::move(input_text), std::move(parse_mode), std::move(entities)));
+
+  return make_object<td_api::inputChecklistTask>(id, std::move(text));
+}
+
+td::Result<td::vector<td_api::object_ptr<td_api::inputChecklistTask>>> Client::get_input_checklist_tasks(
+    td::JsonValue &&value) const {
+  if (value.type() != td::JsonValue::Type::Array) {
+    return td::Status::Error(400, "Expected an Array of InputChecklistTask");
+  }
+
+  td::vector<object_ptr<td_api::inputChecklistTask>> tasks;
+  for (auto &input_task : value.get_array()) {
+    auto r_task = get_input_checklist_task(std::move(input_task));
+    if (r_task.is_error()) {
+      return td::Status::Error(400, PSLICE() << "Can't parse InputChecklistTask: " << r_task.error().message());
+    }
+    tasks.push_back(r_task.move_as_ok());
+  }
+  return std::move(tasks);
+}
+
+td::Result<td_api::object_ptr<td_api::inputChecklist>> Client::get_input_checklist(
+    const Query *query, td::JsonValue &&input_checklist) const {
+  if (input_checklist.type() != td::JsonValue::Type::Object) {
+    return td::Status::Error("expected an Object");
+  }
+
+  auto &object = input_checklist.get_object();
+  TRY_RESULT(input_title, object.get_required_string_field("title"));
+  TRY_RESULT(parse_mode, object.get_optional_string_field("parse_mode"));
+  auto entities = object.extract_field("title_entities");
+  TRY_RESULT(title, get_formatted_text(std::move(input_title), std::move(parse_mode), std::move(entities)));
+  TRY_RESULT(others_can_add_tasks, object.get_optional_bool_field("others_can_add_tasks"));
+  TRY_RESULT(others_can_mark_tasks_as_done, object.get_optional_bool_field("others_can_mark_tasks_as_done"));
+  TRY_RESULT(input_tasks, object.extract_required_field("tasks", td::JsonValue::Type::Array));
+  TRY_RESULT(tasks, get_input_checklist_tasks(std::move(input_tasks)));
+
+  return make_object<td_api::inputChecklist>(std::move(title), std::move(tasks), others_can_add_tasks,
+                                             others_can_mark_tasks_as_done);
+}
+
+td::Result<td_api::object_ptr<td_api::inputChecklist>> Client::get_input_checklist(const Query *query,
+                                                                                   td::Slice field_name) const {
+  TRY_RESULT(checklist, get_required_string_arg(query, field_name));
+
+  LOG(INFO) << "Parsing JSON object: " << checklist;
+  auto r_value = json_decode(checklist);
+  if (r_value.is_error()) {
+    LOG(INFO) << "Can't parse JSON object: " << r_value.error();
+    return td::Status::Error(400, "Can't parse InputChecklist JSON object");
+  }
+
+  auto r_input_checklist = get_input_checklist(query, r_value.move_as_ok());
+  if (r_input_checklist.is_error()) {
+    return td::Status::Error(400, PSLICE() << "Can't parse InputChecklist: " << r_input_checklist.error().message());
+  }
+  return r_input_checklist.move_as_ok();
+}
+
 td::Result<td_api::object_ptr<td_api::InputMessageContent>> Client::get_input_media(const Query *query,
                                                                                     td::JsonValue &&input_media,
                                                                                     bool for_album) const {
@@ -11917,12 +12173,12 @@ void Client::on_message_send_failed(int64 chat_id, int64 old_message_id, int64 n
 }
 
 void Client::on_story_send_succeeded(object_ptr<td_api::story> &&story, int64 old_story_id) {
-  auto full_story_id = FullMessageId{story->sender_chat_id_, old_story_id};
+  auto full_story_id = FullMessageId{story->poster_chat_id_, old_story_id};
   auto yet_unsent_story_it = yet_unsent_stories_.find(full_story_id);
   CHECK(yet_unsent_story_it != yet_unsent_stories_.end());
   auto query = std::move(yet_unsent_story_it->second.query);
   yet_unsent_stories_.erase(yet_unsent_story_it);
-  answer_query(JsonStory(story->sender_chat_id_, story->id_, this), std::move(query));
+  answer_query(JsonStory(story->poster_chat_id_, story->id_, this), std::move(query));
 }
 
 void Client::on_story_send_failed(int64 chat_id, int64 story_id, object_ptr<td_api::error> &&error) {
@@ -12462,6 +12718,12 @@ td::Status Client::process_stop_poll_query(PromisedQueryPtr &query) {
   return td::Status::OK();
 }
 
+td::Status Client::process_send_checklist_query(PromisedQueryPtr &query) {
+  TRY_RESULT(input_checklist, get_input_checklist(query.get(), "checklist"));
+  do_send_message(make_object<td_api::inputMessageChecklist>(std::move(input_checklist)), std::move(query));
+  return td::Status::OK();
+}
+
 td::Status Client::process_copy_message_query(PromisedQueryPtr &query) {
   TRY_RESULT(from_chat_id, get_required_string_arg(query.get(), "from_chat_id"));
   auto message_id = get_message_id(query.get());
@@ -12913,6 +13175,42 @@ td::Status Client::process_edit_message_caption_query(PromisedQueryPtr &query) {
   return td::Status::OK();
 }
 
+td::Status Client::process_edit_message_checklist_query(PromisedQueryPtr &query) {
+  auto business_connection_id = query->arg("business_connection_id");
+  auto chat_id = query->arg("chat_id");
+  auto message_id = get_message_id(query.get());
+  TRY_RESULT(reply_markup, get_reply_markup(query.get(), bot_user_ids_));
+  TRY_RESULT(input_checklist, get_input_checklist(query.get(), "checklist"));
+
+  resolve_reply_markup_bot_usernames(
+      std::move(reply_markup), std::move(query),
+      [this, business_connection_id = business_connection_id.str(), chat_id_str = chat_id.str(), message_id,
+       input_checklist = std::move(input_checklist)](object_ptr<td_api::ReplyMarkup> reply_markup,
+                                                     PromisedQueryPtr query) mutable {
+        if (!business_connection_id.empty()) {
+          return check_business_connection_chat_id(
+              business_connection_id, chat_id_str, std::move(query),
+              [this, message_id, reply_markup = std::move(reply_markup), input_checklist = std::move(input_checklist)](
+                  const BusinessConnection *business_connection, int64 chat_id, PromisedQueryPtr query) mutable {
+                send_request(make_object<td_api::editBusinessMessageChecklist>(business_connection->id_, chat_id,
+                                                                               message_id, std::move(reply_markup),
+                                                                               std::move(input_checklist)),
+                             td::make_unique<TdOnReturnBusinessMessageCallback>(this, business_connection->id_,
+                                                                                std::move(query)));
+              });
+        }
+
+        check_message(chat_id_str, message_id, false, AccessRights::Edit, "message to edit", std::move(query),
+                      [this, reply_markup = std::move(reply_markup), input_checklist = std::move(input_checklist)](
+                          int64 chat_id, int64 message_id, PromisedQueryPtr query) mutable {
+                        send_request(make_object<td_api::editMessageChecklist>(
+                                         chat_id, message_id, std::move(reply_markup), std::move(input_checklist)),
+                                     td::make_unique<TdOnEditMessageCallback>(this, std::move(query)));
+                      });
+      });
+  return td::Status::OK();
+}
+
 td::Status Client::process_edit_message_reply_markup_query(PromisedQueryPtr &query) {
   CHECK_IS_BOT();
   auto business_connection_id = query->arg("business_connection_id");
@@ -13008,7 +13306,7 @@ td::Status Client::process_post_story_query(PromisedQueryPtr &query) {
         auto is_posted_to_chat_page = to_bool(query->arg("post_to_chat_page"));
         auto protect_content = to_bool(query->arg("protect_content"));
         send_request(
-            make_object<td_api::sendStory>(business_connection->user_chat_id_, std::move(content), std::move(areas),
+            make_object<td_api::postStory>(business_connection->user_chat_id_, std::move(content), std::move(areas),
                                            std::move(caption), make_object<td_api::storyPrivacySettingsEveryone>(),
                                            active_period, nullptr, is_posted_to_chat_page, protect_content),
             td::make_unique<TdOnPostStoryCallback>(this, std::move(query)));
@@ -13061,6 +13359,13 @@ td::Status Client::process_create_invoice_link_query(PromisedQueryPtr &query) {
   }
   send_request(make_object<td_api::createInvoiceLink>(td::string(), std::move(input_message_invoice)),
                td::make_unique<TdOnCreateInvoiceLinkCallback>(std::move(query)));
+  return td::Status::OK();
+}
+
+td::Status Client::process_get_my_star_balance_query(PromisedQueryPtr &query) {
+  send_request(make_object<td_api::getStarTransactions>(make_object<td_api::messageSenderUser>(my_id_), td::string(),
+                                                        nullptr, td::string(), 0),
+               td::make_unique<TdOnGetMyStarBalanceCallback>(std::move(query)));
   return td::Status::OK();
 }
 
@@ -15583,7 +15888,7 @@ void Client::on_sent_message(object_ptr<td_api::message> &&message, int64 query_
 
 void Client::on_sent_story(object_ptr<td_api::story> &&story, PromisedQueryPtr query) {
   CHECK(story != nullptr);
-  int64 chat_id = story->sender_chat_id_;
+  int64 chat_id = story->poster_chat_id_;
   int64 story_id = story->id_;
 
   FullMessageId full_story_id{chat_id, story_id};
@@ -15907,6 +16212,7 @@ void Client::add_supergroup(SupergroupInfo *supergroup_info, object_ptr<td_api::
   supergroup_info->status = std::move(supergroup->status_);
   supergroup_info->is_supergroup = !supergroup->is_channel_;
   supergroup_info->is_forum = supergroup->is_forum_;
+  supergroup_info->is_direct_messages = supergroup->is_direct_messages_group_;
   supergroup_info->has_location = supergroup->has_location_;
   supergroup_info->join_to_send_messages = supergroup->join_to_send_messages_;
   supergroup_info->join_by_request = supergroup->join_by_request_;
@@ -16842,6 +17148,8 @@ bool Client::need_skip_update_message(int64 chat_id, const object_ptr<td_api::me
       return true;
     case td_api::messagePaidMessagesRefunded::ID:
       return true;
+    case td_api::messageGroupCall::ID:
+      return true;
     default:
       break;
   }
@@ -16898,6 +17206,10 @@ td::int64 Client::get_same_chat_reply_to_message_id(const object_ptr<td_api::mes
         const auto *content = static_cast<const td_api::messagePaymentSuccessful *>(message->content_.get());
         return content->invoice_chat_id_ == message->chat_id_ ? content->invoice_message_id_ : static_cast<int64>(0);
       }
+      case td_api::messageChecklistTasksDone::ID:
+        return static_cast<const td_api::messageChecklistTasksDone *>(message->content_.get())->checklist_message_id_;
+      case td_api::messageChecklistTasksAdded::ID:
+        return static_cast<const td_api::messageChecklistTasksAdded *>(message->content_.get())->checklist_message_id_;
       default:
         return static_cast<int64>(0);
     }
@@ -17366,7 +17678,7 @@ void Client::init_message(MessageInfo *message_info, object_ptr<td_api::message>
   message_info->can_be_saved = message->can_be_saved_;
   message_info->is_scheduled = message->scheduling_state_ != nullptr;
   message_info->is_from_offline = message->is_from_offline_;
-  message_info->is_topic_message = message->is_topic_message_;
+  message_info->topic_id = std::move(message->topic_id_);
   message_info->author_signature = std::move(message->author_signature_);
   message_info->sender_boost_count = message->sender_boost_count_;
   message_info->paid_message_star_count = message->paid_message_star_count_;
@@ -17620,6 +17932,11 @@ td::int64 Client::get_status_custom_emoji_id(const object_ptr<td_api::emojiStatu
       UNREACHABLE();
       return 0;
   }
+}
+
+bool Client::is_topic_message(const object_ptr<td_api::MessageTopic> &topic_id) {
+  return topic_id != nullptr && topic_id->get_id() == td_api::messageTopicForum::ID &&
+         static_cast<const td_api::messageTopicForum *>(topic_id.get())->forum_topic_id_ != GENERAL_MESSAGE_THREAD_ID;
 }
 
 td::FlatHashMap<td::string, td::Status (Client::*)(PromisedQueryPtr &query)> Client::methods_;

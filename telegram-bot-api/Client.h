@@ -146,6 +146,10 @@ class Client final : public WebhookActor::Callback {
   class JsonPollOption;
   class JsonPoll;
   class JsonPollAnswer;
+  class JsonChecklistTask;
+  class JsonChecklist;
+  class JsonChecklistTasksDone;
+  class JsonChecklistTasksAdded;
   class JsonEntity;
   class JsonVectorEntities;
   class JsonWebAppInfo;
@@ -227,6 +231,7 @@ class Client final : public WebhookActor::Callback {
   class JsonGiveawayCompleted;
   class JsonChatBoostAdded;
   class JsonPaidMessagePriceChanged;
+  class JsonDirectMessagePriceChanged;
   class JsonStarAmount;
   class JsonReceivedGift;
   class JsonReceivedGifts;
@@ -296,6 +301,7 @@ class Client final : public WebhookActor::Callback {
   class TdOnUpgradeGiftCallback;
   class TdOnGetStarAmountCallback;
   class TdOnGetReceivedGiftsCallback;
+  class TdOnGetMyStarBalanceCallback;
   class TdOnGetStarTransactionsCallback;
   class TdOnReplacePrimaryChatInviteLinkCallback;
   class TdOnGetChatInviteLinkCallback;
@@ -634,6 +640,15 @@ class Client final : public WebhookActor::Callback {
   static td::Result<object_ptr<td_api::chatPermissions>> get_chat_permissions(const Query *query, bool &allow_legacy,
                                                                               bool use_independent_chat_permissions);
 
+  td::Result<object_ptr<td_api::inputChecklistTask>> get_input_checklist_task(td::JsonValue &&input_task) const;
+
+  td::Result<td::vector<object_ptr<td_api::inputChecklistTask>>> get_input_checklist_tasks(td::JsonValue &&value) const;
+
+  td::Result<object_ptr<td_api::inputChecklist>> get_input_checklist(const Query *query,
+                                                                     td::JsonValue &&input_checklist) const;
+
+  td::Result<object_ptr<td_api::inputChecklist>> get_input_checklist(const Query *query, td::Slice field_name) const;
+
   td::Result<object_ptr<td_api::InputMessageContent>> get_input_media(const Query *query, td::JsonValue &&input_media,
                                                                       bool for_album) const;
 
@@ -777,6 +792,7 @@ class Client final : public WebhookActor::Callback {
   td::Status process_send_contact_query(PromisedQueryPtr &query);
   td::Status process_send_poll_query(PromisedQueryPtr &query);
   td::Status process_stop_poll_query(PromisedQueryPtr &query);
+  td::Status process_send_checklist_query(PromisedQueryPtr &query);
   td::Status process_copy_message_query(PromisedQueryPtr &query);
   td::Status process_copy_messages_query(PromisedQueryPtr &query);
   td::Status process_forward_message_query(PromisedQueryPtr &query);
@@ -788,6 +804,7 @@ class Client final : public WebhookActor::Callback {
   td::Status process_edit_message_live_location_query(PromisedQueryPtr &query);
   td::Status process_edit_message_media_query(PromisedQueryPtr &query);
   td::Status process_edit_message_caption_query(PromisedQueryPtr &query);
+  td::Status process_edit_message_checklist_query(PromisedQueryPtr &query);
   td::Status process_edit_message_reply_markup_query(PromisedQueryPtr &query);
   td::Status process_delete_message_query(PromisedQueryPtr &query);
   td::Status process_delete_messages_query(PromisedQueryPtr &query);
@@ -795,6 +812,7 @@ class Client final : public WebhookActor::Callback {
   td::Status process_edit_story_query(PromisedQueryPtr &query);
   td::Status process_delete_story_query(PromisedQueryPtr &query);
   td::Status process_create_invoice_link_query(PromisedQueryPtr &query);
+  td::Status process_get_my_star_balance_query(PromisedQueryPtr &query);
   td::Status process_get_star_transactions_query(PromisedQueryPtr &query);
   td::Status process_refund_star_payment_query(PromisedQueryPtr &query);
   td::Status process_edit_user_star_subscription_query(PromisedQueryPtr &query);
@@ -1078,10 +1096,12 @@ class Client final : public WebhookActor::Callback {
     int32 slow_mode_delay = 0;
     int32 unrestrict_boost_count = 0;
     int64 linked_chat_id = 0;
+    int64 direct_messages_chat_id = 0;
     object_ptr<td_api::chatLocation> location;
     object_ptr<td_api::ChatMemberStatus> status;
     bool is_supergroup = false;
     bool is_forum = false;
+    bool is_direct_messages = false;
     bool can_set_sticker_set = false;
     bool can_send_gift = false;
     bool is_all_history_available = false;
@@ -1152,6 +1172,7 @@ class Client final : public WebhookActor::Callback {
     td::unique_ptr<MessageInfo> business_reply_to_message;
     object_ptr<td_api::messageReplyToMessage> reply_to_message;
     object_ptr<td_api::messageReplyToStory> reply_to_story;
+    object_ptr<td_api::MessageTopic> topic_id;
     int64 media_album_id = 0;
     int64 via_bot_user_id = 0;
     object_ptr<td_api::MessageContent> content;
@@ -1169,7 +1190,6 @@ class Client final : public WebhookActor::Callback {
 
     bool can_be_saved = false;
     bool is_automatic_forward = false;
-    bool is_topic_message = false;
     bool is_from_offline = false;
     bool is_scheduled = false;
     mutable bool is_content_changed = false;
@@ -1299,6 +1319,8 @@ class Client final : public WebhookActor::Callback {
   static int64 get_basic_group_chat_id(int64 basic_group_id);
 
   static int64 get_status_custom_emoji_id(const object_ptr<td_api::emojiStatus> &emoji_status);
+
+  static bool is_topic_message(const object_ptr<td_api::MessageTopic> &topic);
 
   void add_update_poll(object_ptr<td_api::updatePoll> &&update);
 
