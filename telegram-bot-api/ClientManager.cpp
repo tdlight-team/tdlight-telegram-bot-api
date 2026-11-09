@@ -193,11 +193,10 @@ void ClientManager::user_login(PromisedQueryPtr query) {
 bool ClientManager::check_flood_limits(PromisedQueryPtr &query, bool is_user_login) {
   td::string ip_address = query->get_peer_ip_address();
   if (!ip_address.empty()) {
-    td::IPAddress tmp;
-    tmp.init_host_port(ip_address, 0).ignore();
-    tmp.clear_ipv6_interface();
-    if (tmp.is_valid()) {
-      ip_address = tmp.get_ip_str().str();
+    auto r_ip_address = td::IPAddress::get_ip_address(ip_address);
+    if (r_ip_address.is_ok()) {
+      r_ip_address.ok_ref().clear_ipv6_interface();
+      ip_address = r_ip_address.ok_ref().get_ip_str().str();
     }
   }
   LOG(DEBUG) << "Receive incoming query for new bot " << query->token() << " from " << ip_address;
@@ -206,25 +205,23 @@ bool ClientManager::check_flood_limits(PromisedQueryPtr &query, bool is_user_log
     if (is_user_login) {
       ip_address += "/user";
     }
-    auto res = flood_controls_.emplace(std::move(ip_address), td::FloodControlFast());
-    auto &flood_control = res.first->second;
-    if (res.second) {
-      if (is_user_login) {
-        flood_control.add_limit(60, 5);         // 5 in a minute
-        flood_control.add_limit(60 * 60, 15);   // 15 in an hour
-      } else {
-        flood_control.add_limit(60, 20);        // 20 in a minute
-        flood_control.add_limit(60 * 60, 600);  // 600 in an hour
-      }
+    auto *flood_control = flood_controls_.access(ip_address);
+    if (flood_control == nullptr) {
+      td::FloodControlFast new_flood_control;
+      new_flood_control.add_limit(60, 20);        // 20 in a minute
+      new_flood_control.add_limit(60 * 60, 600);  // 600 in an hour
+      flood_controls_.set(ip_address, std::move(new_flood_control));
+      flood_control = flood_controls_.access(ip_address);
+      CHECK(flood_control != nullptr);
     }
     auto now = td::Time::now();
-    auto wakeup_at = flood_control.get_wakeup_at();
+    auto wakeup_at = flood_control->get_wakeup_at();
     if (wakeup_at > now) {
       LOG(INFO) << "Failed to create Client from IP address " << ip_address;
       query->set_retry_after_error(static_cast<int>(wakeup_at - now) + 1);
       return false;
     }
-    flood_control.add_event(now);
+    flood_control->add_event(now);
   }
   return true;
 }
