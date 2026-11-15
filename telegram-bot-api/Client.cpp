@@ -9428,23 +9428,33 @@ class Client::TdOnGetChatsCallback : public TdQueryCallback {
 
 class Client::TdOnJoinChatCallback : public TdQueryCallback {
  public:
-  explicit TdOnJoinChatCallback(Client *client, PromisedQueryPtr query, int64 chat_id)
-      : client_(client), query_(std::move(query)), chat_id_(chat_id) {
+  explicit TdOnJoinChatCallback(Client *client, PromisedQueryPtr query) : client_(client), query_(std::move(query)) {
   }
 
   void on_result(object_ptr<td_api::Object> result) override {
     if (result->get_id() == td_api::error::ID) {
       return fail_query_with_error(std::move(query_), move_object_as<td_api::error>(result));
     }
-    CHECK(result->get_id() == td_api::ok::ID);
-
-    answer_query(JsonChat(chat_id_, client_), std::move(query_));
+    switch (result->get_id()) {
+      case td_api::chatJoinResultSuccess::ID: {
+        auto join_result = move_object_as<td_api::chatJoinResultSuccess>(result);
+        return answer_query(JsonChat(join_result->chat_id_, client_), std::move(query_));
+      }
+      case td_api::chatJoinResultRequestSent::ID:
+        // the request must be approved by chat administrators
+        return fail_query(400, "Bad Request: INVITE_REQUEST_SENT", std::move(query_));
+      case td_api::chatJoinResultGuardBotApprovalRequired::ID:
+        return fail_query(403, "Forbidden: approval from a guard bot is required to join the chat", std::move(query_));
+      case td_api::chatJoinResultDeclined::ID:
+        return fail_query(403, "Forbidden: join was declined by a guard bot", std::move(query_));
+      default:
+        UNREACHABLE();
+    }
   }
 
  private:
   const Client *client_;
   PromisedQueryPtr query_;
-  int64 chat_id_;
 };
 
 class Client::TdOnReturnChatCallback : public TdQueryCallback {
@@ -18773,11 +18783,11 @@ td::Status Client::process_join_chat_query(PromisedQueryPtr &query) {
   if (!chat_id.empty()) {
     check_chat(chat_id, AccessRights::Read, std::move(query), [this](int64 chat_id, PromisedQueryPtr query) {
       send_request(make_object<td_api::joinChat>(chat_id),
-                   td::make_unique<TdOnJoinChatCallback>(this, std::move(query), chat_id));
+                   td::make_unique<TdOnJoinChatCallback>(this, std::move(query)));
     });
   } else if (!invite_link.empty()) {
     send_request(make_object<td_api::joinChatByInviteLink>(invite_link.str()),
-                 td::make_unique<TdOnReturnChatCallback>(this, std::move(query)));
+                 td::make_unique<TdOnJoinChatCallback>(this, std::move(query)));
   } else {
     fail_query(400, "Bad request: Please specify chat_id or invite_link", std::move(query));
   }
