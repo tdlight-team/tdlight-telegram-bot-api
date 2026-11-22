@@ -114,6 +114,13 @@ _For Docker containers, `$TELEGRAM_VERBOSITY` can be set._
 ##### Method `getChat`
 The command `getChat` will also try to resolve the username online, if it can't be found locally
 
+##### Method `getUserProfilePhotos`
+The `UserProfilePhotos` object returned by `getUserProfilePhotos` has a new field, `photo_dates`:
+an array of integers (Unix timestamps) telling when each profile photo was added.  
+It is in the same order as `photos` (newest first, as returned by Telegram), so `photo_dates[i]` is the date of `photos[i]`.  
+It is useful, for example, to detect accounts that uploaded many photos recently.  
+All the existing fields are unchanged.
+
 ##### Method `deleteMessages`
 The command `deleteMessages` can also delete all the messages with message_id in range between `start` and `end`.  
 The `start` parameter MUST be less than the `end` parameter  
