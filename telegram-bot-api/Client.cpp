@@ -6329,6 +6329,7 @@ class Client::JsonChatPhotos final : public td::Jsonable {
     object("total_count", photos_->total_count_);
     object("photos", td::json_array(photos_->photos_,
                                     [client = client_](auto &photo) { return JsonChatPhoto(photo.get(), client); }));
+    object("photo_dates", td::json_array(photos_->photos_, [](auto &photo) { return photo->added_date_; }));
   }
 
  private:

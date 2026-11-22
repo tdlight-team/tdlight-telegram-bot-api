@@ -9946,6 +9946,11 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/PhotoSize'
+        photo_dates:
+          description: 'TDLight-only. Unix timestamps when each photo was added; index-aligned with photos.'
+          type: array
+          items:
+            type: integer
       required:
         - total_count
         - photos
